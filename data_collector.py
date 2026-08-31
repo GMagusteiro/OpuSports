@@ -84,6 +84,13 @@ class FootballDataClient:
         data = self._get("fixtures", {"date": date_str})
         return data.get("response", [])
 
+    def get_fixture_by_id(self, fixture_id: int) -> dict[str, Any] | None:
+        """Devolve o payload completo de um jogo específico (útil para
+        confirmar o estado final depois de terminar)."""
+        data = self._get("fixtures", {"id": fixture_id})
+        response = data.get("response", [])
+        return response[0] if response else None
+
     def get_fixture_statistics(self, fixture_id: int) -> list[dict[str, Any]]:
         data = self._get("fixtures/statistics", {"fixture": fixture_id})
         return data.get("response", [])
@@ -119,18 +126,25 @@ def save_fixture(fixture_payload: dict[str, Any]) -> int:
     league = fixture_payload["league"]
     teams = fixture_payload["teams"]
     goals = fixture_payload.get("goals", {})
+    # A API-FOOTBALL devolve o placar ao intervalo em "score.halftime" assim
+    # que o intervalo acontece, independentemente do estado atual do jogo —
+    # é o que nos permite mais tarde resolver o mercado "golos na 2ª parte".
+    halftime = fixture_payload.get("score", {}).get("halftime", {}) or {}
 
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO fixtures (fixture_id, league_id, league_name, home_team, away_team,
-                                   kickoff_utc, status, minute, home_goals, away_goals, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   kickoff_utc, status, minute, home_goals, away_goals,
+                                   home_goals_ht, away_goals_ht, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(fixture_id) DO UPDATE SET
                 status=excluded.status,
                 minute=excluded.minute,
                 home_goals=excluded.home_goals,
                 away_goals=excluded.away_goals,
+                home_goals_ht=COALESCE(excluded.home_goals_ht, fixtures.home_goals_ht),
+                away_goals_ht=COALESCE(excluded.away_goals_ht, fixtures.away_goals_ht),
                 updated_at=excluded.updated_at
             """,
             (
@@ -144,6 +158,8 @@ def save_fixture(fixture_payload: dict[str, Any]) -> int:
                 fixture["status"].get("elapsed"),
                 goals.get("home"),
                 goals.get("away"),
+                halftime.get("home"),
+                halftime.get("away"),
                 now_iso(),
             ),
         )
