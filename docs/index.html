@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpuSports — Bot de Alertas de Value Betting</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121821; --border:#1f2937; --text:#e6edf3;
+    --muted:#9aa7b2; --accent:#22c55e; --accent2:#3b82f6; --warn:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.6}
+  .wrap{max-width:840px;margin:0 auto;padding:48px 20px 80px}
+  header{margin-bottom:40px}
+  h1{font-size:2rem;margin:0 0 8px}
+  .tag{color:var(--muted);font-size:1rem}
+  .badges{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap}
+  .badge{background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:4px 12px;font-size:.8rem;color:var(--muted)}
+  section{margin:32px 0}
+  h2{font-size:1.25rem;border-bottom:1px solid var(--border);padding-bottom:8px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+  @media (max-width:600px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
+  .card h3{margin:0 0 6px;font-size:1rem;color:var(--accent2)}
+  .card p{margin:0;color:var(--muted);font-size:.92rem}
+  pre{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto;font-size:.85rem}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .cta{display:inline-block;margin-top:8px;background:var(--accent2);color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600}
+  .warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:10px;padding:16px;color:#fbbf24}
+  footer{margin-top:60px;color:var(--muted);font-size:.85rem;border-top:1px solid var(--border);padding-top:20px}
+  a{color:var(--accent2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>⚽ OpuSports</h1>
+    <div class="tag">Bot de alertas de value betting para futebol — recolha de dados, modelo preditivo e notificações via Telegram.</div>
+    <div class="badges">
+      <span class="badge">Python 3.9+</span>
+      <span class="badge">scikit-learn</span>
+      <span class="badge">python-telegram-bot</span>
+      <span class="badge">API-FOOTBALL</span>
+    </div>
+  </header>
+
+  <div class="warn">
+    ⚠️ Projeto educativo/experimental. Não é aconselhamento financeiro e não
+    garante lucro. Lê os riscos e limitações no README antes de usar com
+    dinheiro real.
+  </div>
+
+  <section>
+    <h2>O que faz</h2>
+    <div class="grid">
+      <div class="card"><h3>📡 Recolha de dados</h3><p>Jogos ao vivo, estatísticas (xG, cantos, remates, posse) e odds via API-FOOTBALL.</p></div>
+      <div class="card"><h3>🤖 Modelo preditivo</h3><p>RandomForest treinado para estimar probabilidades de golos e cantos, com validação cruzada.</p></div>
+      <div class="card"><h3>📈 Value betting</h3><p>Remove o overround das odds e calcula o Valor Esperado (EV) de cada seleção.</p></div>
+      <div class="card"><h3>🔔 Alertas Telegram</h3><p>Notificações formatadas com competição, estatísticas, odd e EV, mais comandos de gestão.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Início rápido</h2>
+    <pre><code>git clone https://github.com/&lt;o-teu-user&gt;/opusports.git
+cd opusports
+pip install -r requirements.txt
+cp .env.example .env   # preenche as tuas chaves
+python db.py
+python model_trainer.py
+python main.py</code></pre>
+    <a class="cta" href="https://github.com/OWNER/opusports">Ver no GitHub →</a>
+  </section>
+
+  <section>
+    <h2>Stack</h2>
+    <p style="color:var(--muted)">requests · pandas · numpy · scikit-learn · python-telegram-bot · schedule · python-dotenv · joblib · streamlit (dashboard opcional)</p>
+  </section>
+
+  <footer>
+    Documentação completa, guia de configuração, treino com dados reais e
+    avisos legais/éticos no <a href="https://github.com/OWNER/opusports#readme">README do repositório</a>.
+  </footer>
+</div>
+</body>
+</html>
