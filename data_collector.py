@@ -19,6 +19,7 @@ https://www.api-football.com/pricing para os detalhes atualizados.
 
 import logging
 import time
+import unicodedata
 from collections import deque
 from typing import Any, Optional
 
@@ -28,6 +29,30 @@ from config import settings
 from db import get_conn, now_iso
 
 logger = logging.getLogger("opusports.data_collector")
+
+
+def _normalize(text: str) -> str:
+    """Remove acentos e baixa para minúsculas, para comparação tolerante
+    (ex.: "Guimaraes" == "Guimarães")."""
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
+
+
+def fixture_matches_teams(fixture_payload: dict[str, Any], team_names: tuple[str, ...]) -> bool:
+    """Verifica se algum dos nomes em `team_names` é substring do nome da
+    equipa da casa ou de fora deste jogo (comparação tolerante a acentos)."""
+    if not team_names:
+        return True  # sem filtro definido -> aceita todos os jogos
+
+    teams = fixture_payload.get("teams", {})
+    home = _normalize(teams.get("home", {}).get("name", ""))
+    away = _normalize(teams.get("away", {}).get("name", ""))
+
+    for wanted in team_names:
+        wanted_norm = _normalize(wanted)
+        if wanted_norm and (wanted_norm in home or wanted_norm in away):
+            return True
+    return False
 
 
 class RateLimiter:
@@ -205,10 +230,12 @@ def save_fixture_statistics(fixture_id: int, stats_payload: list[dict[str, Any]]
 
 
 def save_odds(fixture_id: int, odds_payload: list[dict[str, Any]]) -> None:
+    seen_markets: set[str] = set()
     with get_conn() as conn:
         for entry in odds_payload:
             for bookmaker in entry.get("bookmakers", []):
                 for bet in bookmaker.get("bets", []):
+                    seen_markets.add(bet.get("name", "?"))
                     for value in bet.get("values", []):
                         conn.execute(
                             """
@@ -227,15 +254,33 @@ def save_odds(fixture_id: int, odds_payload: list[dict[str, Any]]) -> None:
                             ),
                         )
 
+    if seen_markets:
+        logger.info("Fixture %s — mercados de odds recebidos da API: %s", fixture_id, sorted(seen_markets))
 
-def collect_live_snapshot(client: FootballDataClient) -> list[int]:
-    """Faz uma ronda completa de recolha para todos os jogos ao vivo.
+
+def collect_live_snapshot(client: FootballDataClient, team_names: tuple[str, ...] = ()) -> list[int]:
+    """Faz uma ronda completa de recolha para os jogos ao vivo.
+
+    Se `team_names` for passado (ex.: settings.MONITORED_TEAM_NAMES), só
+    processa jogos onde a equipa da casa ou de fora corresponde a um desses
+    nomes — pensado para testes controlados em jogos específicos, sem gastar
+    o limite diário de pedidos do plano gratuito da API-FOOTBALL com jogos
+    que não interessam.
 
     Devolve a lista de fixture_ids processados nesta ronda.
     """
     fixture_ids: list[int] = []
     live_fixtures = client.get_live_fixtures()
-    logger.info("Jogos ao vivo encontrados: %d", len(live_fixtures))
+
+    if team_names:
+        matched = [f for f in live_fixtures if fixture_matches_teams(f, team_names)]
+        logger.info(
+            "Jogos ao vivo encontrados: %d | a corresponder ao filtro de equipas: %d",
+            len(live_fixtures), len(matched),
+        )
+        live_fixtures = matched
+    else:
+        logger.info("Jogos ao vivo encontrados: %d", len(live_fixtures))
 
     for fixture_payload in live_fixtures:
         fixture_id = save_fixture(fixture_payload)
@@ -258,5 +303,5 @@ if __name__ == "__main__":
 
     init_db()
     client = FootballDataClient()
-    ids = collect_live_snapshot(client)
+    ids = collect_live_snapshot(client, team_names=settings.MONITORED_TEAM_NAMES)
     print(f"Snapshot recolhido para {len(ids)} jogo(s).")
