@@ -81,6 +81,36 @@ def build_features_for_fixture(fixture_id: int) -> dict | None:
     return features
 
 
+# Cada entrada liga um modelo treinado a um mercado de odds real.
+# `odds_match`: função que decide se o nome de um mercado da API corresponde
+# a este mercado — importante NÃO ser demasiado permissivo aqui, ou
+# acabamos a comparar a probabilidade de um mercado (ex.: golos na 2ª parte)
+# com a odd de outro completamente diferente (ex.: golos do jogo todo),
+# o que invalida o cálculo do EV.
+MARKET_CONFIGS = [
+    {
+        "model_name": "over_95_corners",
+        "display_market": "Mais de 9.5 Cantos",
+        "odds_match": lambda market: "corner" in market.lower(),
+    },
+    {
+        "model_name": "over_05_2nd_half",
+        "display_market": "Mais de 0.5 Golos (a qualquer momento)",
+        # Aceita qualquer mercado de golos do jogo (não só 2ª parte), porque
+        # é isso que normalmente está disponível nas odds ao vivo.
+        #
+        # AVISO: o modelo "over_05_2nd_half" foi treinado especificamente
+        # para prever golos NA 2ª PARTE, não golos em qualquer momento do
+        # jogo — por isso, ao comparar com odds de "golos a qualquer
+        # momento", a probabilidade usada é uma aproximação, não um cálculo
+        # rigoroso. Serve para o teste de hoje (validar o encanamento), mas
+        # antes de dares mais peso a estes alertas específicos, treina um
+        # modelo dedicado a "próximo golo / qualquer golo" na Fase 3.
+        "odds_match": lambda market: "goal" in market.lower(),
+    },
+]
+
+
 async def process_fixture(app, fixture_id: int) -> None:
     features = build_features_for_fixture(fixture_id)
     if features is None:
@@ -91,7 +121,7 @@ async def process_fixture(app, fixture_id: int) -> None:
             "SELECT * FROM fixtures WHERE fixture_id = ?", (fixture_id,)
         ).fetchone()
         odds_rows = conn.execute(
-            "SELECT * FROM odds_snapshots WHERE fixture_id = ? ORDER BY id DESC LIMIT 20",
+            "SELECT * FROM odds_snapshots WHERE fixture_id = ? ORDER BY id DESC LIMIT 100",
             (fixture_id,),
         ).fetchall()
 
@@ -101,54 +131,55 @@ async def process_fixture(app, fixture_id: int) -> None:
     import pandas as pd
     X = pd.DataFrame([features])[FEATURE_COLUMNS]
 
-    try:
-        model_corners = load_model("over_95_corners")
-        prob_corners = model_corners.predict_proba(X)[0][1]
-    except FileNotFoundError:
-        logger.warning("Modelo 'over_95_corners' não encontrado — corre model_trainer.py primeiro")
-        return
+    for cfg in MARKET_CONFIGS:
+        try:
+            model = load_model(cfg["model_name"])
+            prob = model.predict_proba(X)[0][1]
+        except FileNotFoundError:
+            logger.warning("Modelo '%s' não encontrado — corre model_trainer.py primeiro", cfg["model_name"])
+            continue
 
-    # Agrupa odds por mercado/seleção mais recente (simplificado)
-    selections_odds = {}
-    for r in odds_rows:
-        if r["market"] and "corner" in r["market"].lower():
-            selections_odds[r["selection"]] = r["odd"]
+        # Agrupa odds por seleção mais recente para este mercado específico
+        selections_odds = {}
+        for r in odds_rows:
+            if r["market"] and cfg["odds_match"](r["market"]):
+                selections_odds[r["selection"]] = r["odd"]
 
-    if not selections_odds:
-        return
+        if not selections_odds:
+            continue  # esta API/bookmaker não tem este mercado para este jogo agora
 
-    model_probs = {sel: prob_corners for sel in selections_odds}  # simplificação didática
-    signals = evaluate_market(fixture_id, "Mais de 9.5 Cantos", selections_odds, model_probs)
-    valuable = filter_valuable_signals(signals)
+        model_probs = {sel: prob for sel in selections_odds}  # simplificação didática
+        signals = evaluate_market(fixture_id, cfg["display_market"], selections_odds, model_probs)
+        valuable = filter_valuable_signals(signals)
 
-    for signal in valuable:
-        message = format_alert_message(
-            signal,
-            competition=fixture["league_name"],
-            home_team=fixture["home_team"],
-            away_team=fixture["away_team"],
-            minute=fixture["minute"],
-        )
-        await send_alert(app, message)
-
-        with get_conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO alerts (fixture_id, market, selection, model_probability,
-                                     implied_probability, odd, expected_value, sent_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    fixture_id, signal.market, signal.selection, signal.model_probability,
-                    signal.implied_probability, signal.odd, signal.expected_value, now_iso(),
-                ),
+        for signal in valuable:
+            message = format_alert_message(
+                signal,
+                competition=fixture["league_name"],
+                home_team=fixture["home_team"],
+                away_team=fixture["away_team"],
+                minute=fixture["minute"],
             )
+            await send_alert(app, message)
+
+            with get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO alerts (fixture_id, market, selection, model_probability,
+                                         implied_probability, odd, expected_value, sent_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fixture_id, signal.market, signal.selection, signal.model_probability,
+                        signal.implied_probability, signal.odd, signal.expected_value, now_iso(),
+                    ),
+                )
 
 
 async def run_cycle(client: FootballDataClient, app) -> None:
     logger.info("A iniciar novo ciclo de recolha e análise...")
     try:
-        fixture_ids = collect_live_snapshot(client)
+        fixture_ids = collect_live_snapshot(client, team_names=settings.MONITORED_TEAM_NAMES)
     except Exception:
         logger.exception("Erro na recolha de dados — ciclo saltado")
         return
@@ -173,6 +204,13 @@ async def main_async() -> None:
             "OpuSports Bot iniciado. Intervalo de polling: %ss | Limiar EV: %.1f%%",
             settings.POLL_INTERVAL_SECONDS, settings.EV_THRESHOLD * 100,
         )
+        if settings.MONITORED_TEAM_NAMES:
+            logger.info("Filtro de equipas ativo (modo de teste): %s", ", ".join(settings.MONITORED_TEAM_NAMES))
+        else:
+            logger.warning(
+                "Sem filtro de equipas — o bot vai processar TODOS os jogos ao vivo do mundo. "
+                "Isto pode esgotar rapidamente o limite diário de pedidos de planos gratuitos/baixos."
+            )
         try:
             while True:
                 await run_cycle(client, app)
