@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS fixtures (
     minute INTEGER,
     home_goals INTEGER,
     away_goals INTEGER,
+    home_goals_ht INTEGER,
+    away_goals_ht INTEGER,
     updated_at TEXT
 );
 
@@ -77,11 +79,26 @@ CREATE TABLE IF NOT EXISTS bot_config (
 """
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Adiciona colunas novas a bases de dados já existentes (migração leve,
+    sem dependências externas). Ignora o erro se a coluna já existir."""
+    migrations = [
+        "ALTER TABLE fixtures ADD COLUMN home_goals_ht INTEGER",
+        "ALTER TABLE fixtures ADD COLUMN away_goals_ht INTEGER",
+    ]
+    for statement in migrations:
+        try:
+            conn.execute(statement)
+        except sqlite3.OperationalError:
+            pass  # coluna já existe
+
+
 def init_db(db_path: str = None) -> None:
-    """Cria as tabelas se ainda não existirem."""
+    """Cria as tabelas se ainda não existirem e aplica migrações leves."""
     path = db_path or settings.DB_PATH
     with sqlite3.connect(path) as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
 
 
