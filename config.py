@@ -56,6 +56,13 @@ class Settings:
         int(x) for x in os.getenv("MONITORED_LEAGUE_IDS", "").split(",") if x.strip()
     ))
 
+    # --- Equipas monitorizadas, por nome (para testes controlados em jogos
+    # específicos, poupando pedidos do plano gratuito). Vazio = todos os jogos
+    # ao vivo. Ex.: "Braga,Vitoria Guimaraes,Benfica,Estoril" ---
+    MONITORED_TEAM_NAMES: tuple = field(default_factory=lambda: tuple(
+        t.strip() for t in os.getenv("MONITORED_TEAM_NAMES", "").split(",") if t.strip()
+    ))
+
     # --- Caminhos locais ---
     DB_PATH: str = os.getenv("DB_PATH", "data/opusports.db")
     LOG_PATH: str = os.getenv("LOG_PATH", "logs/opusports.log")
